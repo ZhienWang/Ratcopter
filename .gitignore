@@ -1,0 +1,19 @@
+# The Solar2D SDK used to be vendored here (extracted/, ~692 MB) and was
+# purged from the repo's history. Install Solar2D from https://solar2d.com
+# instead; if you unpack it inside the project again, this keeps it out of
+# the repo. See the build command at the top of README.md.
+extracted/
+
+# Build artefacts. Produced by CoronaBuilder from mainGame/, so they are
+# reproducible rather than source.
+build_output/
+
+# Web bundles zipped up for itch.io uploads.
+*.zip
+
+# NOTE: build_output/ and the *.zip bundles were committed before this file
+# existed, so they are still tracked and these two rules do nothing for them
+# -- .gitignore only applies to untracked paths. To actually drop them:
+#   git rm -r --cached build_output *.zip
+# That stops tracking them going forward but leaves them in past commits (a
+# second history rewrite would be needed to reclaim that space).
