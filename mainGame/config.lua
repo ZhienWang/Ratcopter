@@ -1,0 +1,9 @@
+local L0_1, L1_1
+L0_1 = {}
+L1_1 = {}
+L1_1.width = 960
+L1_1.height = 540
+L1_1.scale = "zoomEven"
+L1_1.fps = 60
+L0_1.content = L1_1
+application = L0_1

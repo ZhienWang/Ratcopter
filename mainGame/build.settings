@@ -1,0 +1,28 @@
+--
+-- build.settings -- web (HTML5) build only.
+--
+-- This project ships as a web build (see the build command in README.md).
+-- There is no iOS or Android target any more, so everything that only fed
+-- a native app build is gone from here: the portrait orientation lock (the
+-- game is a 16:9 landscape canvas and never honoured it anyway), the
+-- `android` and `iphone` sections, the `LaunchScreen`/`Images.xcassets`
+-- references, and the `plugin.vk.direct` dependency the original Corona
+-- project carried -- which main.lua never required. The files those
+-- pointed at were removed alongside this change.
+--
+-- Note that the canvas size and scaling are NOT set here -- they live in
+-- config.lua (960x540, "zoomEven").
+--
+-- For more information on build.settings, see the Project Build Settings
+-- guide at:
+-- https://docs.coronalabs.com/guide/distribution/buildSettings
+--
+
+settings =
+{
+	-- Deliberately empty: main.lua requires no plugins, and listing one
+	-- here makes CoronaBuilder go and fetch it at build time.
+	plugins =
+	{
+	},
+}

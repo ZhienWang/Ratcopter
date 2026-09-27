@@ -772,3 +772,109 @@ python -m http.server 8000
   `github.com/ZhienWang/Ratcopter` needs a force-push, which breaks any
   existing clone or fork. filter-repo also drops the `origin` remote on
   purpose to prevent an accidental one; it has to be re-added by hand.
+
+## 2026-09-26 — commit `TBD` ("Add pipe shapes, slow-closing clamps, and a per-round difficulty ramp")
+
+- **"do your best to create 5 more different settings for the game, add
+  different shapes of pipes, such as a triangle, half moon, pentagon, etc,
+  also add a moving one the clamps, but clamps really slowly"**
+
+  *Pipes became two jaws.* A pipe used to be one 100x1000 image with a hole
+  painted through the middle, which meant the opening was fixed the moment
+  the art was drawn. It is now a display group holding a top jaw and a bottom
+  jaw, positioned either side of an opening the game decides at runtime --
+  which is the whole reason a clamp can close. The group's own `y` still
+  doubles as the centre of the opening, so `updateAI` and `spawnDot`, which
+  both read `p.y`, needed no change.
+
+  *Shapes are art, not just hitbox.* `tools/make_pipe_shapes.py` generates
+  16 jaw images (4 skins x 4 shapes) into `mainGame/Assets/`, rebuilding each
+  jaw from its source pipe's own gradient and rim so the new shapes sit next
+  to the original art rather than beside it. Every pipe body turned out to be
+  the same horizontal gradient repeated down the image, which is why a jaw of
+  any height can be rebuilt from one sampled row. The four whole-pipe images
+  are kept as that script's source. The set is 37 KB in total -- a gradient
+  compresses to almost nothing.
+
+  `shapeNotchPx()` in main.lua mirrors `notch_at()` in the generator: a
+  triangle tapers linearly to a point, a half-moon follows a circle, a
+  pentagon holds a flat band across the middle 45% and chamfers out. Depth is
+  scaled per shape so the broader the tight stretch, the shallower the bite,
+  or the pentagon would be far crueller than the triangle at the same number.
+  Both run the profile across the *painted* 63% of the image width rather
+  than the full hitbox, so a triangle comes to its point at the edge of the
+  pipe you can actually see.
+
+  *The clamp.* Flat jaws that squeeze together as the pipe comes at you.
+  Always flat and always two-jawed: a shaped tip on a closing opening stacks
+  two narrowings and can leave nothing to fly through. Its countdown runs
+  only while the pipe is on screen, so one queued up behind a burst of coins
+  does not arrive already shut.
+
+  Testing caught the close time being wrong. At the first-guess 4.0s a pipe
+  is only on screen for about 3.6s, so a clamp could never finish closing and
+  `clamp_gap_min` was unreachable -- the harness proved it by never once
+  observing the floor. 2.5s closes visibly the whole way across and is about
+  85% shut at the moment you fly through it.
+
+  *The AI needed telling.* Its bob was a flat 32px, tuned against a 50px
+  half-opening, and 32px of wander inside a triangle's 30px pinch is a
+  guaranteed crash. The amplitude is now the same *share* of whatever the
+  pipe being flown at actually leaves open, so it tracks shapes, clamps and
+  `pipe_gap_half_height` alike.
+
+  *Five settings*, plus `pipe_gap_half_height` promoted out of a hardcoded
+  50 to be the reference the rest are measured against:
+  `pipe_shaped_chance`, `clamp_pipe_chance`, `clamp_close_time`,
+  `clamp_gap_min`.
+
+- **"make the pipes to only have a single pipe in the beginning, then
+  gradually gets two pipes on the same column, but with wider gaps, then it
+  becomes smaller at around 2 minutes mark. At 0-30 seconds, there should
+  only be one pipe."**
+
+  Asked two things first, because both readings were live. "A single pipe"
+  turned out to mean one jaw per column -- hanging from the ceiling or
+  standing off the floor, with open lane past it to fly round -- rather than
+  splitting the existing gap in two with a middle block. And the ramp runs on
+  a clock that restarts every round, chosen over total match time with the
+  trade-off stated: a round ends the instant either bird crashes, so at the
+  ~16s rounds the harness sees, the later eras are rare. That is visible in
+  the numbers -- a 64-round run built 310 one-pipe columns against 2
+  two-pipe ones. Lower the thresholds in `gameSetting.csv` to bring the rest
+  of the curve into reach.
+
+  *Three eras*, all tunable: one jaw only for the first 30s; two-jaw columns
+  mixed in with increasing likelihood until 90s; the opening closing from
+  1.35x the base gap down to 0.85x between 120s and 180s.
+
+  A one-jaw column is placed by its *edge* rather than by a gap centre, so
+  the lane it leaves open is a known size -- at least four times the half-gap
+  -- instead of whatever `randomGapY` happens to give once the ramp has
+  scaled things. `laneCollides` only tests the jaws a column actually has,
+  and `pipeAim` hands the AI the middle of the open lane rather than a gap
+  centre that does not exist. Coins moved onto the same aim point: averaging
+  two `p.y` values put them inside a jaw for one-pipe columns.
+
+  *Six more settings:* `ramp_single_pipe_until`, `ramp_two_pipe_by`,
+  `ramp_tighten_at`, `ramp_tighten_by`, `ramp_gap_wide`, `ramp_gap_tight`.
+
+  *A wall worth recording.* Adding all of this hit Lua's hard ceiling of 200
+  locals per function -- everything in this file lives inside `main()` -- and
+  the compile failed pointing at a keybind-menu variable hundreds of lines
+  from anything that changed. The new constants were regrouped into `JAW`,
+  `SHAPES`, `CLAMP` and `RAMP` tables, which bought back a dozen slots.
+  Anything substantial added here will hit it again; grouping into a table is
+  the cheap fix, and a `do ... end` block around a section would free its
+  locals entirely.
+
+  *How it was checked.* The headless harness grew assertions for the ramp:
+  no two-jaw column before `ramp_single_pipe_until`, none one-jaw after
+  `ramp_two_pipe_by`, every pipe's opening matching the curve for the second
+  it was built in, jaws always drawn where the hitbox says the edge is, and
+  clamps only ever closing. Since a normal round is far too short to reach
+  the later eras, it also runs against a staged copy with the ramp compressed
+  into seconds. That compressed run found its own bug first: at a 1.5s single
+  era, no pipe can exist yet at all -- the first one cannot appear before
+  about 2s, since a coin has to be collected and then `COIN_PIPE_DELAY`
+  passes -- so the thresholds had to clear that floor.
