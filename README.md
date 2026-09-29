@@ -5,18 +5,24 @@ made in response, grouped by the date of the commit that shipped it. New
 entries are appended here and committed alongside the code change they
 describe, so this file's history lines up with `git log`.
 
-Requires Solar2D (https://solar2d.com) to be installed -- the SDK used to be
-vendored in `extracted/` and is not in this repo any more. The path below is
-a default Windows install; adjust it if yours differs.
+Solar2D is no longer installed, so there is no CoronaBuilder build any more.
+`tools/repack_html5.py` updates the last HTML5 build in place instead: it
+compiles `main.lua`/`config.lua` to the runtime's 32-bit Lua 5.1 bytecode and
+swaps them, the art and `gameSetting.csv` into the existing package, keeping
+the wasm runtime as it is. Needs Python with `lupa` and `Pillow` installed.
 
-Build command:
-Remove-Item -Recurse -Force build_output -ErrorAction SilentlyContinue
-New-Item -ItemType Directory -Force build_output
-& "C:\Program Files (x86)\Corona Labs\Corona\Native\Corona\win\bin\CoronaBuilder.exe" build --lua build_html5.lua
+`build_output/` is gitignored, so the build there is not in history.
+`ratcopter-web-current.zip` (2026-09-19) is the last CoronaBuilder build and
+the base the repack was first applied to; unzip its `.bin`/`.data` over
+`build_output/ratcopter.html5/` to start from it again.
 
-Run command:
-cd build_output\ratcopter.html5
-python -m http.server 8000
+Build command (run from the repo root):
+python tools/repack_html5.py
+
+Run command (from the repo root; serves with caching off -- see
+tools/serve.py for why plain `python -m http.server` can show a black screen):
+python tools/serve.py
+
 ---
 
 ## 2026-09-11 — commit `c6b4c26` ("decompiled update")
@@ -878,3 +884,298 @@ python -m http.server 8000
   era, no pipe can exist yet at all -- the first one cannot appear before
   about 2s, since a coin has to be collected and then `COIN_PIPE_DELAY`
   passes -- so the thresholds had to clear that floor.
+
+## 2026-09-27 — commit `TBD` ("Add teeth jaws, drifting columns and breathing clamps")
+
+- **"continue design from last night"** -- picked up as *more pipe variety*.
+
+  Three new kinds of pipe, each behind its own setting so any of them can be
+  turned off from `gameSetting.csv`.
+
+  *Teeth.* A fifth jaw shape: three small triangles tip to tip across the
+  painted body. It is added to `SHAPE_DEPTH` in `tools/make_pipe_shapes.py`
+  as the *last* entry on purpose -- speckle seeds are handed out by position
+  in that dict, so adding it anywhere else would have repainted all 16
+  existing jaws. Regenerating left those 16 byte-identical and added four
+  files (10 KB). Each tooth reaches the same depth as a triangle's point, so
+  it bites no deeper, but there are three tips to line up with, so it is
+  trimmed to 0.85 of the notch. The profile is written on `u` rather than
+  `|u|` so, with an odd number of teeth, the middle one's point lands on
+  `u = 0` -- which is where `pipeAim` reads the tightest spot from.
+  `shapeNotchPx` in main.lua mirrors it; checked against the generator at
+  241 points (identical) and against the drawn edge of the art (within half
+  a pixel).
+
+  *Drifting columns.* The whole column -- jaws and opening together -- swings
+  slowly up and down (35px either side, 3s a swing) as it comes. Any column
+  can drift, one jaw or two, flat or shaped, except a clamp or a breather:
+  an opening that is both moving and changing size asks two things at once.
+  Each starts at a random point in its swing so a run of drifters is not a
+  row moving in lockstep, and like a clamp it only advances while on screen.
+  The amplitude is capped at `pipe_gap_half_height`, which is more than the
+  closest any column is ever placed to the edge of where gaps can go, so a
+  drifting jaw still covers the lane end to end -- the harness asserts that
+  on every tick.
+
+  Moving `p.y` meant the one-jaw aim point could no longer be worked out
+  once at spawn and stored: `pipeAim` now derives it from the column's
+  current edge, and coin placement calls `pipeAim` rather than reading the
+  stored `aimY` fields, which are gone.
+
+  *Breathing clamps.* A clamp that does not stay shut: flat jaws close to
+  0.55 of the opening and reopen on a 1.6s rhythm, so the question is *when*
+  to go through rather than whether there is room. Two-jaw columns only,
+  rolled only for one the clamp roll passed over. It comes on screen wide
+  open (the cosine starts at 1), so the first thing you see of one is its
+  gap at its widest. Its tightest point is looser than a clamp's 0.45
+  because it comes round again every breath instead of once.
+
+  *Six more settings:* `breathe_pipe_chance` (0.12), `breathe_period`,
+  `breathe_gap_min`, `drift_pipe_chance` (0.2), `drift_amplitude`,
+  `drift_period`.
+
+  *The AI needed telling again, twice.* With every column forced to drift,
+  the AI crashed 30 times in 446 pipes against teeth. Its autopilot only
+  pushes in proportion to how far off it is, so against a moving target it
+  settles into trailing it -- about 18px behind at full drift speed, which on
+  top of a 32px bob is more than a toothed opening leaves. `updateAI` now
+  feeds forward how fast the aim point itself is moving, counted only while
+  it is still the same pipe so that switching targets does not read as one
+  enormous tick of motion. It keeps its 100ms reaction lag; it just no
+  longer lags a *moving* target on top of that.
+
+  Breathers killed it too, mostly late in a round when openings are already
+  tight: the bob was sized off how open the gap was *this* tick, so when
+  the jaws came back in the bird was still out near the edge. For a breather
+  it is now sized off the tightest breath instead.
+
+  *How it was checked.* The headless harness from earlier entries was not in
+  the repo, so a fresh one was written: Solar2D stubs, main.lua run
+  unmodified under Lua 5.1 through `lupa`, one exported table of internals
+  appended before the game-loop timer. The player lane is flown
+  "perfectly" -- held on `pipeAim` every tick -- so if it ever dies, an
+  opening was not actually passable at its aim point; it never did. Each
+  new pipe kind was run at 100% for 1000 simulated seconds with the AI's
+  deliberate loss roll switched off and pipes fed into both lanes every
+  1.5s, plus a mixed run with the ramp's tight era compressed to the start.
+  Asserted every tick: clamps, breathers and drift never stack; breathers
+  stay flat, two-jawed, inside their range, and open fully on their first
+  frame; drift never passes its amplitude; jaws are drawn where the hitbox
+  puts the edge and still reach both ends of the lane. After the two AI
+  fixes, every scenario came in at 0-0.6 AI crashes per 100 pipes, in line
+  with the existing clamp-only run (0.62) and baseline (0.21).
+
+  *Not rebuilt.* Solar2D is not installed on this machine, so
+  `build_output/` still holds the 2026-09-26 21:57 build, which predates
+  both this entry and the last edits of the previous one.
+
+## 2026-09-28 — commit `TBD` ("Phase the newer pipes in over a round")
+
+- **"continue from my last design"** -- picked up as *tie the new pipes to
+  the ramp*.
+
+  Drift, teeth and breathers were rolled at full chance from the first
+  column of a round. They now come in on the ramp's round clock, each with a
+  window: never before `from`, then a chance climbing linearly from nothing
+  to its full setting by `by`. Defaults put each one in an era: drift at
+  10-30s, across the one-jaw opening where there is most room to fly round a
+  moving pipe; teeth at 20-45s, as columns start pairing up; breathers at
+  45-90s, once most columns have both jaws to breathe with. Clamps and the
+  three older shapes are left as they were -- the request was about the
+  new pipes.
+
+  *Teeth are weighted, not gated.* A shape still being phased in counts for
+  its unlock fraction in the shape roll, so half-unlocked teeth are half as
+  likely as any other shape and a locked one simply drops out, rather than a
+  failed teeth roll turning into a flat pipe. `pipe_shaped_chance` means the
+  same thing it always did.
+
+  *Kept out of the local count.* The windows and the lookup live on `RAMP`
+  (`RAMP.unlocks`, `RAMP.unlocked`), not as new locals -- the 200-local
+  ceiling from 2026-09-26 still stands.
+
+  *Six more settings:* `ramp_drift_from`/`_by`, `ramp_teeth_from`/`_by`,
+  `ramp_breathe_from`/`_by`. A `_by` at or below its `_from` switches that
+  kind fully on at `_from`.
+
+  *The same trade-off as the rest of the ramp.* A round ends on the first
+  crash and typically runs ~16s, so at these defaults most rounds see a
+  little drift and no teeth or breathers at all. That is what "held back"
+  means on a per-round clock; lower the windows to meet them sooner.
+
+  *How it was checked.* The harness now records the round time each pipe was
+  built at and fails on any drift, teeth or breather built before its
+  `from`. 3000 simulated seconds at the default settings (perfect player,
+  AI's loss roll off so rounds run long enough to reach the later eras):
+  none early. Shares in 10s buckets rise through each window and settle at
+  about 14% drift, 11% teeth and 10% breathers -- what the chances predict
+  once clamps take their cut. AI crash rate unchanged (3 in 1431 pipes). A
+  backwards window (`from` 15, `by` 5) gave 0% before 15s and 100% after.
+
+  *Still not rebuilt:* Solar2D is still not installed here.
+
+## 2026-09-28 — commit `TBD` ("Build without Solar2D: repack the HTML5 package directly")
+
+- **"forget about Solar2d, it's removed. Anyway, the single pipes (up/down),
+  wider gaps, are not in the game"**
+
+  *Why they were missing.* The build being played was never rebuilt after
+  2026-09-19. Its file dates said 2026-09-26 21:57, but its package still
+  carried the vk plugin removed on 09-24 and none of the jaw art, and every
+  byte outside the compiled Lua and `gameSetting.csv` matches
+  `ratcopter-web-current.zip`. So none of the one-jaw era, wider gaps,
+  shapes, clamps or anything since had ever been in a playable build.
+
+  *Building without Solar2D.* An HTML5 build is three parts: the wasm
+  runtime and its loader zipped into `ratcopter.bin`, an Emscripten file
+  package `ratcopter.data` (raw files back to back), and the index of that
+  package, a JSON literal inside `ratcopter.js`. The game's Lua sits in
+  `resource.car`, Corona's own archive, as compiled Lua 5.1 bytecode for a
+  32-bit target. None of that needs Solar2D to change, only to be written in
+  the same shape, so `tools/repack_html5.py` does exactly that:
+
+  - compiles `main.lua` and `config.lua` with Lua 5.1 through `lupa` and
+    rewrites the bytecode from the host's 64-bit layout to 32-bit. Only
+    `size_t` differs (the length in front of every string), so the rewrite
+    walks the chunk field by field and changes nothing else.
+  - rebuilds `resource.car` with them (format worked out from the old one:
+    a 16-byte header, a padded name index, 12-byte headed data blocks, and
+    an 8-byte end marker that the first attempt missed).
+  - swaps every non-Lua file in `mainGame/` into the package, adds new ones,
+    rewrites the index, and gives the package a new UUID so a browser cannot
+    serve a cached copy of the old one.
+
+  `build.settings` is left as the last real build had it: CoronaBuilder
+  consumed it at build time, and the current file has never been through a
+  build. The vk plugin shims stay in `resource.car` for the same reason --
+  they were there in every build that has run.
+
+  *How it was checked.* The tool refuses to write anything unless its
+  self-tests pass against the build it is about to replace: the old
+  `resource.car` round-trips byte for byte, all four of CoronaBuilder's own
+  bytecode chunks survive 32->64->32 unchanged, a fresh compile of
+  `main.lua` survives 64->32->64 unchanged and still loads, and the `.bin`
+  re-zips to identical members. Then the result was loaded in real Chrome
+  through Playwright: it boots to the title screen, a click starts a round,
+  and a one-jaw concrete column standing off the floor arrives in the
+  player's lane -- the single-pipe era, live for the first time. The console
+  shows the same audio-decode errors and 404s as the untouched 09-19 build
+  under the same headless browser, and nothing else.
+
+  *A slip, recorded.* The first repack ran in place on the assumption that
+  `build_output/` was in git; it is gitignored. Nothing was lost -- the
+  overwritten build is the 09-19 zip, byte for byte, as above -- but the
+  README header now says where the base build lives.
+
+- **"why is it just a black screen now"** / **"it's still a black screen"**
+
+  *Browser cache, twice over.* The `.bin` carries the byte offsets of every
+  file in the `.data`, so the two only load as a matched pair; a new `.bin`
+  with an old `.data` is a black screen with no error. `python -m http.server`
+  sends no `Cache-Control`, so Chrome is free to reuse either file for hours
+  without asking. The server log showed exactly that: the page and the new
+  `.bin` were fetched, and `ratcopter.data` never requested at all -- it came
+  out of the cache from the old 09-19 build.
+
+  Making it worse, nine stale `python -m http.server 8000` processes from
+  09-17..09-27 were still running. Windows lets them share the port, and the
+  ones bound to 127.0.0.1 won `localhost` over any server started since, so
+  restarting "the" server changed nothing. All stopped.
+
+  *Fixes.* `tools/serve.py` serves the build with `no-store`. That alone
+  cannot evict a copy a browser already holds, so `repack_html5.py` now also
+  stamps both download URLs with the build's id (`ratcopter.bin?v=...` in the
+  pages, `ratcopter.data?v=...` in the loader): a URL no earlier build used
+  cannot be answered from cache. Reproduced with a real Chrome profile
+  poisoned by the 09-19 build served the old way: on reload the unstamped
+  new build got the page from the server and both game files from cache;
+  the stamped build fetched all three from the server and played.
+
+## 2026-09-28 — commit `TBD` ("Turn triangle and half-moon tips into wide ground obstacles")
+
+- **"for the triangle and curved pipes, the width of the pipe needs to be
+  larger, they are not really pipes at that point, they are different type of
+  shaped obstacles. so balance them based on that, give them another texture
+  if needed. for example, Triangle can be a pyramid looking bricks, or a
+  Trapezoid ramp, half-moon shapes can be an actual hump on the ground"**
+
+  *Two ground obstacles replace two pipe tips.* The triangle becomes a
+  stepped brick pyramid (3-6 courses of 28x18 bricks, each course half a brick
+  in from each side, a single brick on top) and the half-moon becomes a hump
+  (half an ellipse, 150x56 to 230x92). Both stand on the ground, 1.8-5x a
+  pipe's width. Pipes keep the straight, pentagon and teeth tips.
+
+  *Where they go.* A column's bottom half is a ground obstacle with
+  `ground_obstacle_chance` (0.25), rolled after clamps and breathers so those
+  keep their frequency. In the opening one-piece era an obstacle stands
+  alone; once columns pair up, a flat pipe hangs above it -- flat, because a
+  shaped tip biting down on an obstacle reaching up narrows one opening from
+  both sides. There is nothing to choose about height: the obstacle's peak is
+  fixed by its size, and the opening sits directly on it, with `p.y` still the
+  centre of the opening, so `pipeAim` and coin placement needed no special
+  case. Obstacles never drift -- the ground does not move.
+  `pipe_shaped_chance` came down from 0.55 to 0.35 so pentagons and teeth
+  still turn up about as often as when they were two shapes of four.
+
+  *Width had to be taught to everything.* Each column now carries `halfW`,
+  and spawning, spacing, clean-up and the AI's choice of target all measure
+  off it rather than `PIPE_HALF_W`. Without that a wide obstacle would pop in
+  already half on screen, vanish with half of it still showing, crowd the
+  column before it, and the AI would start aiming for the next column while
+  still over the back of a hump. Spacing is now between edges rather than
+  centres, so two humps in a row keep a pipe-pair's clear run between them.
+
+  *The hitbox is the outline.* `GROUND.surfaceAt` gives the obstacle's
+  surface at any point across it; `tools/make_ground_obstacles.py` draws to
+  that same outline. Checked column by column: the pyramids agree exactly;
+  the humps within 1.6px except the outermost few pixels at their feet, where
+  the ellipse is near vertical, drawn in 2px steps, and under 10px off the
+  ground.
+
+  *Balance.* A new bot flies the player lane with the real gravity and flap,
+  a 125ms reaction lag and a noisy flap threshold, and anticipates its own
+  fall the way a person does (without that it lagged into every bottom jaw).
+  At the base opening it crashes at 11-14% of flat pipes -- and at 40% of
+  the old triangle tips and 44% of the half-moons. The target was to leave
+  the game as hard as it was, so each obstacle was matched to the tip it
+  replaced. The knob is how much of the usual opening is left between the
+  pipe above and the peak (`GROUND.open`): at 1.0 an obstacle column is no
+  harder than a flat pipe (~12%), at 0.8 about 50%. Settled at 0.85 for the
+  pyramid (42% on a fresh seed, target 40%) and 0.83 for the hump (45%,
+  target 44%) -- a hump's broad crown leaves less room to sag across its
+  width. Almost every crash is into the pipe above, not the obstacle: a
+  steady flyer holds its height over the peak, so what decides difficulty is
+  the room left, not the width.
+
+  *Worth knowing:* the shaped tips were already three times as deadly as a
+  flat pipe at the base opening -- pentagon 39%, teeth 45%, against 11-14%.
+  Both jaws bite, so a triangle left 60px where a flat pipe leaves 100. The
+  obstacles are matched to that level; if it feels harsh, raise
+  `GROUND.open` towards 1.0.
+
+  *Art.* Drawn at half size and doubled with nearest-neighbour to match the
+  backgrounds' chunky pixels. Sewer: clay bricks, warmer than the green-grey
+  wall so they read as something in the way, with moss and grime on the
+  lower courses; a silt mound with a slime crust and stones (the first pass
+  was too dark and disappeared into the wall). Surface: sandstone blocks; a
+  grassy hill in the greens of the horizon bushes. 14 files, 23 KB. A theme
+  switch re-skins obstacles already on screen.
+
+  *Retired.* The eight triangle and half-moon jaw images are deleted and the
+  pipe generator no longer draws them; the remaining 12 jaws came out
+  byte-identical, since each shape's speckle seed is its position in
+  `SHAPE_DEPTH` and those entries were kept. `repack_html5.py` now mirrors
+  `Assets/` and `Sounds/` from `mainGame/` exactly, so art deleted there
+  leaves the build too (it also dropped `Icon-1024.png`, gone from
+  `mainGame/` since 09-24 and never loaded by the game).
+
+  *How it was checked.* Rule harness, every tick: no obstacle on a clamp,
+  breather or drifter; never with a bottom jaw or a shaped pipe above; opening
+  sitting exactly on the peak; art standing on the ground; every column
+  appearing wholly off screen, removed only once wholly off, and keeping a
+  pipe-pair's clear run from the one before. Across default, everything-on
+  and late-tight runs: no violations, no missing images, the perfect player
+  never died, AI 0.3-0.44 crashes per 100 pipes, none on an obstacle. In
+  Chrome, a build with every column an obstacle showed pyramids and humps
+  riding in on both lanes; a theme switch re-skinned every obstacle in the
+  harness (16 of 16).

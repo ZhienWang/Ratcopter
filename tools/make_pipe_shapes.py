@@ -3,7 +3,7 @@
 A pipe is two jaws (a top one and the same image flipped for the bottom), so
 the gap between them can be moved at runtime -- that is what lets a clamp
 pipe close slowly. Each jaw's inner end carries a shape: flat, a triangular
-point, a pentagon's chamfered flat, or a half-moon bulge.
+point, a pentagon's chamfered flat, a half-moon bulge, or a row of teeth.
 
 Run from the repo root:
 
@@ -45,7 +45,21 @@ SHAPE_DEPTH = {
     "triangle": 1.0,
     "halfmoon": 0.8,
     "pentagon": 0.65,
+    # Kept last: seeds are handed out by position in this dict, so adding a
+    # shape anywhere else would reshuffle the speckles on every existing jaw.
+    # Three teeth, each a small triangle. Every tooth reaches the same depth,
+    # so it is no crueller than a triangle at the tip -- just three times as
+    # many tips to line up with -- and is trimmed a little for that.
+    "teeth": 0.85,
 }
+
+TEETH = 3        # teeth across the visible body
+
+# Triangle and half-moon are no longer drawn: in the game they became ground
+# obstacles (tools/make_ground_obstacles.py). Their depths stay in
+# SHAPE_DEPTH because each shape's speckle seed is its position in that dict,
+# and dropping two entries would repaint every jaw after them.
+RETIRED = {"triangle", "halfmoon"}
 
 # The source art's opaque body spans x 18..81 of 100, so the drawn pipe is
 # 63% of the image width. Shape profiles are defined across that visible
@@ -72,6 +86,14 @@ def notch_at(shape, u):
         if a <= flat:
             return depth
         return depth * (1.0 - (a - flat) / (1.0 - flat))
+    if shape == "teeth":
+        # A sawtooth of TEETH triangles tip-to-tip across -1..1. Written on
+        # u rather than a so the middle tooth's point lands on u = 0 for an
+        # odd count, which is where main.lua's pipeAim takes the tightest
+        # point from.
+        t = (u + 1.0) * TEETH / 2.0
+        f = t - math.floor(t)
+        return depth * (1.0 - abs(2.0 * f - 1.0))
     return 0.0
 
 
@@ -163,6 +185,8 @@ def main():
     for si, stem in enumerate(SKINS):
         body, rim = sample_source(stem)
         for shi, shape in enumerate(SHAPE_DEPTH):
+            if shape in RETIRED:
+                continue
             img = build_jaw(shape, body, rim, seed=si * 17 + shi)
             out = os.path.join(ASSETS, f"jaw_{stem}_{shape}.png")
             img.save(out, optimize=True)
