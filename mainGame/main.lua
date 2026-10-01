@@ -117,8 +117,13 @@ local LAND_TOP = LANE_H * (1 - LAND_HEIGHT_FRACTION) -- where the ground art's t
 -- instead of stopping dead the instant it touches the top edge.
 local GROUND_LIMIT = LAND_TOP + (LANE_H - LAND_TOP) / 2
 local CEIL_LIMIT = LANE_H * 0.1
-local GRAVITY = 1500
-local FLAP_VY = -430
+-- Floatier than the original 1500 / -430: both scaled so one flap keeps the
+-- bird up 1/0.7 (~1.43x) as long -- airtime per flap is 2*|FLAP_VY|/GRAVITY
+-- -- which takes ~30% fewer flaps to stay up, while the hop height
+-- (FLAP_VY^2 / (2*GRAVITY)) is unchanged, so gaps feel the same size.
+-- Flap scaled by 0.7, gravity by 0.7^2 = 0.49.
+local GRAVITY = 735
+local FLAP_VY = -301
 local SCROLL_SPEED = 108 * LANE_SCALE
 local PIPE_SPACING = 190 * LANE_SCALE
 local PIPE_HALF_W = 32 * LANE_SCALE -- 20% narrower than the original 40
@@ -1428,6 +1433,64 @@ laneDivider:setFillColor(0.04, 0.04, 0.04)
 resetLane(playerLane)
 resetLane(aiLane)
 
+-- ---------- "THIS IS YOU!" tag ----------
+-- Floats over the player's bird for the first few seconds of a match (round
+-- 1 only), so a new player can tell which rat is theirs. It lives in the
+-- player lane's group so it moves with the bird and is clipped with the lane,
+-- and it is aged by gameLoop's ticks rather than a timer so it freezes along
+-- with everything else while the keybind menu is open. Everything hangs off
+-- one table because main() is already close to Lua 5.1's 200-local limit.
+local youTag = {
+  DURATION = 3,
+  FADE = 0.5, -- seconds of fade-out at the end
+  remaining = 0,
+  group = display.newGroup(),
+}
+playerLane.group:insert(youTag.group)
+youTag.shadow = display.newText({ parent = youTag.group, text = "THIS IS YOU!", x = 2, y = 2, font = "Assets/troika.otf", fontSize = 22 })
+youTag.shadow:setFillColor(0, 0, 0)
+youTag.text = display.newText({ parent = youTag.group, text = "THIS IS YOU!", x = 0, y = 0, font = "Assets/troika.otf", fontSize = 22 })
+youTag.text:setFillColor(1, 0.82, 0.12)
+youTag.group.isVisible = false
+-- a portrait phone leaves a lane narrower than the text, so shrink to fit
+do
+  local fit = (LANE_W - 12) / youTag.text.contentWidth
+  if fit < 1 then
+    youTag.group.xScale, youTag.group.yScale = fit, fit
+  end
+end
+
+function youTag.hide()
+  youTag.remaining = 0
+  youTag.group.isVisible = false
+end
+
+function youTag.update(dt)
+  if youTag.remaining <= 0 then return end
+  youTag.remaining = youTag.remaining - dt
+  if youTag.remaining <= 0 then
+    youTag.hide()
+    return
+  end
+  local bird = playerLane.bird
+  local elapsed = youTag.DURATION - youTag.remaining
+  local bob = math.sin(elapsed * 2 * math.pi / 1.6) * 4
+  -- kept inside the lane: the bird starts close to the left edge and can fly
+  -- right up to CEIL_LIMIT, so an unclamped tag would be clipped on either side
+  local halfW = youTag.text.contentWidth * youTag.group.xScale / 2
+  local halfH = youTag.text.contentHeight * youTag.group.yScale / 2
+  youTag.group.x = math.min(LANE_W - halfW - 6, math.max(halfW + 6, bird.x))
+  youTag.group.y = math.max(halfH + 4, bird.y - bird.contentHeight / 2 - 16 + bob)
+  youTag.group.alpha = math.min(1, youTag.remaining / youTag.FADE)
+end
+
+function youTag.show()
+  youTag.remaining = youTag.DURATION
+  youTag.group.isVisible = true
+  youTag.group:toFront()
+  youTag.update(0)
+end
+
 local function otherLane(lane)
   return lane.isAI and playerLane or aiLane
 end
@@ -1712,6 +1775,9 @@ onFlapInput = function()
   match.phase = "playing"
   audio.play(swooshingSound)
   refreshOverlay()
+  if match.round == 1 then
+    youTag.show()
+  end
 end
 
 -- Mirrors the mouse's hold-to-dash timer (see onMouseEvent below) but for
@@ -2220,12 +2286,14 @@ local function gameLoop()
     updateAI(aiLane, TICK_DT)
   end
   updateLane(aiLane, TICK_DT)
+  youTag.update(TICK_DT)
 
   -- Elimination: the first crash ends the round for BOTH lanes. Leaving
   -- "playing" is what stops them -- nothing calls updateLane outside this
   -- branch any more -- so the survivor freezes exactly where it was
   -- instead of flying on alone.
   if not playerLane.alive or not aiLane.alive then
+    youTag.hide()
     finishRound()
     return
   end
