@@ -1179,3 +1179,46 @@ python tools/serve.py
   Chrome, a build with every column an obstacle showed pyramids and humps
   riding in on both lanes; a theme switch re-skinned every obstacle in the
   harness (16 of 16).
+
+## 2026-10-01 — commit `TBD` ("Floatier flaps and a THIS IS YOU tag")
+
+- **"Make the bird have more airtime before it falls, so the game requires
+  30% less input from players"**
+
+  *The numbers.* One flap sets the bird's speed to `FLAP_VY` and gravity
+  pulls it back, so it is back at the same height after `2*|FLAP_VY|/GRAVITY`
+  seconds: 0.57s at the old 1500 / -430. Needing 30% fewer flaps means each
+  one has to last 1/0.7 = 1.43x as long. Changing gravity alone would get
+  there but make every hop 43% taller, which plays like a different game
+  through the same gaps. Scaling the flap by 0.7 and gravity by 0.7^2 = 0.49
+  gives the longer airtime and leaves the hop height (`FLAP_VY^2 /
+  (2*GRAVITY)`) exactly where it was: `GRAVITY` 1500 -> 735, `FLAP_VY` -430
+  -> -301. Airtime per flap is now 0.82s.
+
+  *Side effects.* Falling and climbing are both slower, so getting from a
+  low gap to a high one takes more lead. The AI lane never used gravity (its
+  autopilot sets its speed directly), so it flies exactly as before. The
+  09-28 obstacle balancing was measured with a bot flying the old physics,
+  so those crash rates are no longer current.
+
+- **"Add a "This is you!" Yellow floating text to my player screen that lasts
+  3 seconds from the start"**
+
+  *What it does.* When round 1 of a match starts, a yellow "THIS IS YOU!" in
+  the game's font, with a black drop shadow, hovers just above the player's
+  rat, follows it, bobs gently and fades out over the last half second of its
+  3 seconds. Rounds 2-5 don't show it. It is hidden at once if the round ends
+  early, and it ages on `gameLoop`'s ticks, so it pauses with the keybind menu.
+
+  *Fitting it in.* It lives in the player lane's group, so it is clipped with
+  the lane and never spills into the AI's side. It is clamped inside the lane
+  (the rat starts near the left edge and can climb to the ceiling) and scaled
+  down on a portrait phone, where the lane is narrower than the text. All its
+  state sits in one `youTag` table, because `main()` is right at Lua 5.1's
+  200-local limit: the first version, with its own locals, failed to compile.
+
+  *How it was checked.* Rebuilt with `tools/repack_html5.py` on top of the
+  09-19 zip (self-tests passed) and played in headless Chrome at 960x640 and
+  390x844: the tag appears over the rat on the first tap, follows it, fits
+  the lane in portrait and is gone on the elimination screen. The only
+  console errors are the usual audio-decode ones.
